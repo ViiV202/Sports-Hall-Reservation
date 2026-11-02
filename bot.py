@@ -3,24 +3,19 @@ import json
 import telebot
 from telebot import types, apihelper
 from dotenv import load_dotenv
-import db  # ایمپورت کردن فایل دیتابیس کنار پروژه
+import db
 
 # بارگذاری متغیرهای محیطی
 load_dotenv()
 
 
 def load_bot_token() -> str:
-    """
-    خواندن هوشمند توکن:
-    این تابع ابتدا توکن شما را که از فایل Token.txt استخراج شده برمی‌گرداند.
-    همچنین اگر فایل Token.txt را ویرایش کنید، به صورت خودکار پیشوندهایی مثل 'TestBot:' را حذف می‌کند.
-    """
+    """خواندن هوشمند توکن از فایل Token.txt یا متغیر محیطی"""
     default_token = "9106404923:AAHk4Kz0elPBr3BoeCr1tu1zvhFr2LA4ZHs"
     if os.path.exists("Token.txt"):
         try:
             with open("Token.txt", "r", encoding="utf-8") as f:
                 raw = f.read().strip()
-                # اگر عبارت دارای پیشوند مثل TestBot: باشد، فقط دو بخش آخر (آیدی و هش توکن) را برمی‌دارد
                 parts = raw.split(":")
                 if len(parts) >= 2:
                     return f"{parts[-2]}:{parts[-1]}"
@@ -29,34 +24,36 @@ def load_bot_token() -> str:
     return os.getenv("BOT_TOKEN", default_token)
 
 
-# 🔑 ۱. توکن اختصاصی بات شما (جایگزین‌شده و آماده اجرا):
 BOT_TOKEN = load_bot_token()
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://viiv202.github.io/Sports-Hall-Reservation/index.html")
 
-# 🌐 ۲. لینک HTTPS مربوط به فایل index.html مینی‌اپ:
-WEBAPP_URL = os.getenv("WEBAPP_URL", "http://localhost:8000/index.html")
-
-# 🛡️ ۳. تنظیم پروکسی برای عبور از فیلترینگ تلگرام در ایران:
-# اگر فیلترشکن شما روی حالت Tun Mode یا System Proxy نیست، خط زیر را از کامنت خارج کنید (علامت # اول خط را بردارید) و پورت فیلترشکن خود را بنویسید:
+# تنظیم پروکسی در صورت نیاز
 apihelper.proxy = {'https': 'http://127.0.0.1:3067'}
 
-# ساخت نمونه اصلی بات با پشتیبانی از تگ‌های HTML برای بولد کردن متن‌ها
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
-# راه‌اندازی خودکار دیتابیس و پر کردن دیتای دمو هنگام روشن شدن بات
+# راه‌اندازی دیتابیس هنگام روشن شدن بات
 db.init_db()
 if not db.get_slots():
     db.reset_demo_data()
 
+# حافظه موقت برای نگهداری مراحل ثبت‌نام کاربران
+reg_temp = {}
+
+# لیست پست‌های قابل انتخاب در مرحله سوم ثبت‌نام
+POSITIONS_MAP = {
+    "gk": "دروازه‌بان 🧤",
+    "def": "عقب‌گیر / دفاع 🛡️",
+    "wing": "وینگر (چپ/راست) 🏃",
+    "att": "مهاجم (راس) ⚡"
+}
+
 
 # =====================================================================
-# توابع کمکی برای ساخت منوی اصلی و ویرایش بدون خطای پیام‌ها
+# توابع کمکی منوها و کیبوردها
 # =====================================================================
 
 def safe_edit_message(text: str, chat_id: int, message_id: int, reply_markup=None):
-    """
-    ویرایش پیام فعلی برای جلوگیری از شلوغ شدن صفحه چت.
-    اگر کاربر دو بار روی یک دکمه کلیک کند، از بروز خطای تلگرام جلوگیری می‌کند.
-    """
     try:
         bot.edit_message_text(
             text=text,
@@ -70,12 +67,22 @@ def safe_edit_message(text: str, chat_id: int, message_id: int, reply_markup=Non
             bot.send_message(chat_id, text, reply_markup=reply_markup)
 
 
+def get_webapp_reply_keyboard() -> types.ReplyKeyboardMarkup:
+    """کیبورد پایین صفحه مخصوص باز کردن مینی‌اپ گرافیکی"""
+    webapp_kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    webapp_kb.add(
+        types.KeyboardButton(
+            text="📱 باز کردن مینی‌اپ گرافیکی (چمن فوتسال و رزرو)",
+            web_app=types.WebAppInfo(url=WEBAPP_URL)
+        )
+    )
+    return webapp_kb
+
+
 def get_main_menu_keyboard(user_id: int) -> types.InlineKeyboardMarkup:
-    """ساخت دکمه‌های شیشه‌ای منوی اصلی با نمایش وضعیت لحظه‌ای کاربر و تعداد فیش‌های منتظر تایید"""
+    """منوی اصلی بازیکن (بدون دکمه پنل مدیر سالن)"""
     user = db.upsert_user(user_id, "کاربر")
     avail_badge = "🟢 فعال" if user.get("is_available") else "⚪ غیرفعال"
-    pending_count = len(db.get_pending_slots())
-    pending_badge = f" ({pending_count} فیش جدید)" if pending_count > 0 else ""
 
     kb = types.InlineKeyboardMarkup(row_width=1)
     kb.add(
@@ -83,22 +90,253 @@ def get_main_menu_keyboard(user_id: int) -> types.InlineKeyboardMarkup:
         types.InlineKeyboardButton("🤝 لابی‌های تیم‌یابی امشب (تکمیل تیم)", callback_data="menu_lobbies"),
         types.InlineKeyboardButton("🔍 پیدا کردن یار کمکی (بازیکنان آماده)", callback_data="menu_players"),
         types.InlineKeyboardButton(f"⚡ وضعیت آمادگی من برای امشب: {avail_badge}", callback_data="menu_avail"),
-        types.InlineKeyboardButton(f"⚙️ پنل اختصاصی مدیر سالن{pending_badge}", callback_data="menu_admin"),
+        types.InlineKeyboardButton("📝 ثبت‌نام مجدد / ویرایش پروفایل بازیکن", callback_data="start_register"),
         types.InlineKeyboardButton("🎛 ریست اطلاعات دمو (ویژه جلسه ارائه)", callback_data="demo_reset")
     )
     return kb
 
 
-def get_main_menu_text(user_name: str) -> str:
-    """متن خوش‌آمدگویی منوی اصلی"""
+def get_main_menu_text(user_id: int, fallback_name: str = "ورزشکار") -> str:
+    """متن خوش‌آمدگویی منوی اصلی به همراه خلاصه پروفایل بازیکن"""
+    user = db.upsert_user(user_id, fallback_name)
+    name = user.get("full_name") or fallback_name
+    pos = user.get("position") or "آزاد"
+    phone = user.get("phone") or "ثبت نشده"
     return (
-        f"👋 سلام <b>{user_name}</b> عزیز!\n"
+        f"👋 سلام <b>{name}</b> عزیز!\n"
         f"به سامانه هوشمند <b>رزرو سالن و هم‌تیمی‌یابی فوتسال</b> خوش آمدید.\n\n"
+        f"👤 <b>پست تخصصی شما:</b> {pos}\n"
+        f"📞 <b>شماره هماهنگی:</b> <code>{phone}</code>\n\n"
         f"🔹 <b>رزرو آنلاین سانس</b> با تایید آنی\n"
         f"🔹 <b>پیدا کردن یار کمکی</b> برای تیم‌های ناقص\n"
         f"🔹 <b>لابی‌های عمومی</b> برای هماهنگی افراد تکی\n\n"
         f"👇 لطفاً یکی از بخش‌های زیر را انتخاب کنید:"
     )
+
+
+def get_admin_menu_keyboard() -> types.InlineKeyboardMarkup:
+    """ساخت کیبورد شیشه‌ای پنل اختصاصی مدیر سالن"""
+    pending_count = len(db.get_pending_slots())
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        types.InlineKeyboardButton("🔄 باز و بسته کردن کلیکی سانس‌ها (🟢/🔴)", callback_data="admin_toggle_list"),
+        types.InlineKeyboardButton(f"🧾 بررسی فیش‌های در انتظار تایید ({pending_count})", callback_data="admin_pending"),
+        types.InlineKeyboardButton("➕ افزودن سریع سانس و قیمت جدید", callback_data="admin_add_day"),
+        types.InlineKeyboardButton("📢 تبدیل سانس خالی مانده به لابی عمومی", callback_data="admin_slot_to_lobby")
+    )
+    return kb
+
+
+def get_admin_menu_text() -> str:
+    pending_count = len(db.get_pending_slots())
+    return (
+        f"⚙️ <b>پنل اختصاصی مدیریت سالن ورزشی:</b>\n\n"
+        f"📥 فیش‌های منتظر بررسی: <b>{pending_count} مورد</b>\n"
+        f"💡 <i>برای بازگشت به پنل بازیکن از دستور</i> /rule_player <i>استفاده کنید.</i>"
+    )
+
+
+# =====================================================================
+# دستورات تغییر نقش مستقیم (/rule_Hallad و /rule_player)
+# =====================================================================
+
+@bot.message_handler(commands=["rule_Hallad", "rule_hallad"])
+def cmd_rule_hall_admin(message: types.Message):
+    """ورود مستقیم به پنل مدیر سالن با دستور /rule_Hallad"""
+    bot.clear_step_handler_by_chat_id(message.chat.id)
+    user_id = message.from_user.id
+    db.upsert_user(user_id, message.from_user.first_name or "مدیر سالن")
+    db.set_user_role(user_id, "manager")
+
+    bot.send_message(
+        message.chat.id,
+        get_admin_menu_text(),
+        reply_markup=get_admin_menu_keyboard()
+    )
+
+
+@bot.message_handler(commands=["rule_player", "rule_Player"])
+def cmd_rule_player(message: types.Message):
+    """ورود مستقیم به پنل بازیکن با دستور /rule_player"""
+    bot.clear_step_handler_by_chat_id(message.chat.id)
+    user_id = message.from_user.id
+    fallback_name = message.from_user.first_name or "ورزشکار"
+    db.upsert_user(user_id, fallback_name)
+    db.set_user_role(user_id, "player")
+
+    bot.send_message(
+        message.chat.id,
+        "🏃 <b>پنل کاربری بازیکن فعال شد!</b>\n"
+        "از دکمه پایین صفحه می‌توانید نمای گرافیکی زمین و سانس‌ها را باز کنید:",
+        reply_markup=get_webapp_reply_keyboard()
+    )
+    bot.send_message(
+        message.chat.id,
+        get_main_menu_text(user_id, fallback_name),
+        reply_markup=get_main_menu_keyboard(user_id)
+    )
+
+
+# =====================================================================
+# فرآیند ثبت‌نام ۳ مرحله‌ای در شروع ربات (نام -> شماره تماس -> پست تخصصی)
+# =====================================================================
+
+def start_registration_flow(chat_id: int, user_id: int):
+    """شروع مرحله ۱ ثبت‌نام: دریافت نام و نام خانوادگی"""
+    bot.clear_step_handler_by_chat_id(chat_id)
+    reg_temp[user_id] = {"name": "", "phone": "", "positions": set()}
+
+    msg = bot.send_message(
+        chat_id,
+        "📝 <b>خوش آمدید! ثبت‌نام اولیه بازیکن (گام ۱ از ۳):</b>\n\n"
+        "لطفاً <b>نام و نام خانوادگی</b> خود را وارد کنید:",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    bot.register_next_step_handler(msg, process_reg_name_step)
+
+
+def process_reg_name_step(message: types.Message):
+    """ذخیره نام و رفتن به مرحله ۲: دریافت شماره تماس"""
+    if message.text and message.text.startswith("/"):
+        # اگر کاربر وسط ثبت‌نام دستور جدیدی زد
+        if message.text.lower().startswith("/rule_hallad"):
+            cmd_rule_hall_admin(message)
+        elif message.text.lower().startswith("/rule_player"):
+            cmd_rule_player(message)
+        elif message.text.lower().startswith("/start"):
+            cmd_start(message)
+        return
+
+    user_id = message.from_user.id
+    full_name = (message.text or message.from_user.first_name or "ورزشکار").strip()
+    if user_id not in reg_temp:
+        reg_temp[user_id] = {"name": full_name, "phone": "", "positions": set()}
+    else:
+        reg_temp[user_id]["name"] = full_name
+
+    # کیبورد اشتراک‌گذاری شماره تماس تلگرام
+    contact_kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    contact_kb.add(
+        types.KeyboardButton("📱 اشتراک‌گذاری شماره تماس من", request_contact=True)
+    )
+
+    msg = bot.send_message(
+        message.chat.id,
+        f"✅ نام شما (<b>{full_name}</b>) ثبت شد.\n\n"
+        f"📞 <b>گام ۲ از ۳ (شماره تماس):</b>\n"
+        f"برای هماهنگی بازی‌ها و لابی‌ها، لطفاً روی دکمه <b>«📱 اشتراک‌گذاری شماره تماس من»</b> در پایین صفحه بزنید (یا شماره موبایل خود را تایپ کنید):",
+        reply_markup=contact_kb
+    )
+    bot.register_next_step_handler(msg, process_reg_phone_step)
+
+
+def process_reg_phone_step(message: types.Message):
+    """ذخیره شماره تماس و رفتن به مرحله ۳: انتخاب پست‌های تخصصی"""
+    if message.text and message.text.startswith("/"):
+        if message.text.lower().startswith("/rule_hallad"):
+            cmd_rule_hall_admin(message)
+        elif message.text.lower().startswith("/rule_player"):
+            cmd_rule_player(message)
+        elif message.text.lower().startswith("/start"):
+            cmd_start(message)
+        return
+
+    user_id = message.from_user.id
+    if message.content_type == "contact" and message.contact:
+        phone = message.contact.phone_number
+    else:
+        phone = (message.text or "09120000000").strip()
+
+    if user_id not in reg_temp:
+        reg_temp[user_id] = {"name": message.from_user.first_name or "ورزشکار", "phone": phone, "positions": set()}
+    else:
+        reg_temp[user_id]["phone"] = phone
+
+    # فعال‌سازی مجدد کیبورد مینی‌اپ در پایین صفحه
+    bot.send_message(
+        message.chat.id,
+        "✅ شماره تماس دریافت شد!",
+        reply_markup=get_webapp_reply_keyboard()
+    )
+
+    # ارسال کیبورد شیشه‌ای انتخاب پست‌های تخصصی
+    bot.send_message(
+        message.chat.id,
+        "⚽ <b>گام ۳ از ۳ (پست تخصصی):</b>\n\n"
+        "در کدام پست‌ها تبحر بیشتری دارید؟\n"
+        "<i>(می‌توانید یک یا چند پست را تیک بزنید و سپس روی دکمه ثبت نهایی کلیک کنید):</i>",
+        reply_markup=build_positions_keyboard(user_id)
+    )
+
+
+def build_positions_keyboard(user_id: int) -> types.InlineKeyboardMarkup:
+    """ساخت کیبورد چندانتخابی برای پست‌های تخصصی فوتسال"""
+    selected = reg_temp.get(user_id, {}).get("positions", set())
+    kb = types.InlineKeyboardMarkup(row_width=2)
+
+    buttons = []
+    for code, label in POSITIONS_MAP.items():
+        mark = "✅ " if code in selected else "⬜ "
+        buttons.append(types.InlineKeyboardButton(f"{mark}{label}", callback_data=f"regpos_{code}"))
+
+    kb.add(*buttons)
+    kb.add(types.InlineKeyboardButton("🚀 ثبت نهایی اطلاعات و ورود به ربات", callback_data="regpos_done"))
+    return kb
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("regpos_"))
+def cb_register_positions(call: types.CallbackQuery):
+    """مدیریت تیک زدن پست‌ها و اتمام ثبت‌نام"""
+    user_id = call.from_user.id
+    if user_id not in reg_temp:
+        reg_temp[user_id] = {
+            "name": call.from_user.first_name or "ورزشکار",
+            "phone": "09120000000",
+            "positions": set()
+        }
+
+    action = call.data.split("_")[1]
+    if action == "done":
+        chosen_codes = reg_temp[user_id]["positions"]
+        if not chosen_codes:
+            bot.answer_callback_query(call.id, "⚠️ لطفاً حداقل یک پست را انتخاب کنید!", show_alert=True)
+            return
+
+        pos_str = " ، ".join([POSITIONS_MAP[c] for c in chosen_codes])
+        name = reg_temp[user_id]["name"]
+        phone = reg_temp[user_id]["phone"]
+
+        db.complete_user_registration(user_id, name, phone, pos_str)
+        bot.answer_callback_query(call.id, "🎉 ثبت‌نام شما با موفقیت تکمیل شد!")
+
+        safe_edit_message(
+            get_main_menu_text(user_id, name),
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=get_main_menu_keyboard(user_id)
+        )
+    else:
+        # اضافه یا کم کردن پست انتخابی (Toggle)
+        if action in reg_temp[user_id]["positions"]:
+            reg_temp[user_id]["positions"].remove(action)
+        else:
+            reg_temp[user_id]["positions"].add(action)
+
+        safe_edit_message(
+            "⚽ <b>گام ۳ از ۳ (پست تخصصی):</b>\n\n"
+            "در کدام پست‌ها تبحر بیشتری دارید؟\n"
+            "<i>(می‌توانید یک یا چند پست را تیک بزنید و سپس روی دکمه ثبت نهایی کلیک کنید):</i>",
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=build_positions_keyboard(user_id)
+        )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "start_register")
+def cb_start_register_again(call: types.CallbackQuery):
+    """شروع مجدد فرآیند ثبت‌نام با کلیک روی دکمه ویرایش پروفایل"""
+    bot.answer_callback_query(call.id)
+    start_registration_flow(call.message.chat.id, call.from_user.id)
 
 
 # =====================================================================
@@ -107,39 +345,36 @@ def get_main_menu_text(user_name: str) -> str:
 
 @bot.message_handler(commands=["start", "demo"])
 def cmd_start(message: types.Message):
-    """وقتی کاربر دستور /start را می‌زند، هم دکمه مینی‌اپ و هم منوی شیشه‌ای ارسال می‌شود"""
-    user_name = message.from_user.first_name or "ورزشکار"
-    db.upsert_user(message.from_user.id, user_name)
+    """بررسی ثبت‌نام کاربر در دستور /start؛ اگر ثبت‌نام نکرده باشد، مراحل ثبت‌نام آغاز می‌شود"""
+    bot.clear_step_handler_by_chat_id(message.chat.id)
+    user_id = message.from_user.id
+    fallback_name = message.from_user.first_name or "ورزشکار"
+    user = db.upsert_user(user_id, fallback_name)
 
-    # کیبورد پایین صفحه مخصوص باز کردن مینی‌اپ گرافیکی (Web App)
-    webapp_kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    webapp_kb.add(
-        types.KeyboardButton(
-            text="📱 باز کردن مینی‌اپ گرافیکی (چمن فوتسال و رزرو)",
-            web_app=types.WebAppInfo(url=WEBAPP_URL)
-        )
-    )
+    # اگر کاربر هنوز ثبت‌نام اولیه را انجام نداده است، وارد فرآیند ثبت‌نام شود
+    if not user.get("is_registered"):
+        start_registration_flow(message.chat.id, user_id)
+        return
 
     bot.send_message(
         message.chat.id,
         "✨ <b>نسخه مینی‌اپ گرافیکی فعال است!</b>\n"
         "می‌توانید از دکمه پایین صفحه نمای زمین فوتسال را باز کنید یا از منوی شیشه‌ای زیر استفاده نمایید:",
-        reply_markup=webapp_kb
+        reply_markup=get_webapp_reply_keyboard()
     )
 
     bot.send_message(
         message.chat.id,
-        get_main_menu_text(user_name),
-        reply_markup=get_main_menu_keyboard(message.from_user.id)
+        get_main_menu_text(user_id, fallback_name),
+        reply_markup=get_main_menu_keyboard(user_id)
     )
 
 
 @bot.callback_query_handler(func=lambda call: call.data == "main_menu")
 def cb_main_menu(call: types.CallbackQuery):
-    """بازگشت به منوی اصلی با کلیک روی دکمه بازگشت"""
-    user_name = call.from_user.first_name or "ورزشکار"
+    fallback_name = call.from_user.first_name or "ورزشکار"
     safe_edit_message(
-        get_main_menu_text(user_name),
+        get_main_menu_text(call.from_user.id, fallback_name),
         call.message.chat.id,
         call.message.message_id,
         reply_markup=get_main_menu_keyboard(call.from_user.id)
@@ -150,8 +385,6 @@ def cb_main_menu(call: types.CallbackQuery):
 def cb_demo_reset(call: types.CallbackQuery):
     """ریست کامل دیتابیس به حالت اولیه برای تکرار سناریو در جلسه دمو"""
     db.reset_demo_data()
-    user_name = call.from_user.first_name or "ورزشکار"
-    db.upsert_user(call.from_user.id, user_name)
     bot.answer_callback_query(
         call.id,
         "♻️ دیتابیس دمو با موفقیت به حالت اولیه (لابی ۵ از ۶ نفر و سانس‌های نمونه) ریست شد!",
@@ -166,7 +399,6 @@ def cb_demo_reset(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_slots")
 def cb_menu_slots(call: types.CallbackQuery):
-    """نمایش لیست سانس‌های سالن به همراه وضعیت هر سانس با رنگ‌بندی"""
     slots = db.get_slots()
     kb = types.InlineKeyboardMarkup(row_width=1)
 
@@ -194,13 +426,11 @@ def cb_menu_slots(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data == "slot_busy")
 def cb_slot_busy(call: types.CallbackQuery):
-    """نمایش پیغام هشدار در صورت کلیک روی سانس‌های پر"""
     bot.answer_callback_query(call.id, "⚠️ این سانس قبلاً رزرو شده یا در انتظار بررسی فیش است.", show_alert=True)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("slot_select_"))
 def cb_slot_select(call: types.CallbackQuery):
-    """نمایش پیش‌فاکتور سانس انتخابی و دکمه ارسال فیش"""
     slot_id = int(call.data.split("_")[2])
     slot = db.get_slot_by_id(slot_id)
     if not slot or slot["status"] != "free":
@@ -227,20 +457,16 @@ def cb_slot_select(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("slot_fastpay_"))
 def cb_slot_fastpay(call: types.CallbackQuery):
-    """ثبت فوری فیش فرضی با یک کلیک برای سرعت بخشیدن به جلسه ارائه دمو"""
     slot_id = int(call.data.split("_")[2])
-    user_name = call.from_user.first_name or "سرگروه تیم"
-    db.submit_booking_receipt(slot_id, call.from_user.id, user_name, "DEMO_FAST_RECEIPT")
+    user = db.upsert_user(call.from_user.id, call.from_user.first_name or "سرگروه تیم")
+    db.submit_booking_receipt(slot_id, call.from_user.id, user["full_name"], "DEMO_FAST_RECEIPT")
 
     kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        types.InlineKeyboardButton("⚙️ رفتن مستقیم به پنل مدیر سالن برای تایید فیش", callback_data="admin_pending"),
-        types.InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="main_menu")
-    )
+    kb.add(types.InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="main_menu"))
     safe_edit_message(
         "✅ <b>فیش واریزی با موفقیت ثبت شد!</b>\n\n"
         "🟡 وضعیت سانس به <b>«در انتظار تایید مدیر سالن»</b> تغییر یافت.\n"
-        "💡 <i>(نکته دمو: حالا دکمه زیر را بزنید تا در نقش مدیر سالن فیش را تایید کنید!)</i>",
+        "💡 <i>(نکته دمو: برای ورود به پنل مدیر و تایید فیش، دستور</i> /rule_Hallad <i>را ارسال کنید!)</i>",
         call.message.chat.id,
         call.message.message_id,
         reply_markup=kb
@@ -249,30 +475,32 @@ def cb_slot_fastpay(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("slot_upload_"))
 def cb_slot_upload(call: types.CallbackQuery):
-    """دریافت عکس یا متن فیش از کاربر با استفاده از register_next_step_handler"""
     slot_id = int(call.data.split("_")[2])
     msg = bot.send_message(call.message.chat.id, "📸 لطفاً تصویر فیش یا شماره پیگیری را ارسال کنید:")
     bot.register_next_step_handler(msg, process_receipt_step, slot_id)
 
 
 def process_receipt_step(message: types.Message, slot_id: int):
-    """ذخیره فیش ارسالی کاربر در دیتابیس"""
-    user_name = message.from_user.first_name or "سرگروه تیم"
+    user = db.upsert_user(message.from_user.id, message.from_user.first_name or "سرگروه تیم")
     receipt_info = message.photo[-1].file_id if message.content_type == "photo" else (message.text or "RECEIPT")
-    db.submit_booking_receipt(slot_id, message.from_user.id, user_name, receipt_info)
+    db.submit_booking_receipt(slot_id, message.from_user.id, user["full_name"], receipt_info)
 
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="main_menu"))
-    bot.send_message(message.chat.id, "✅ فیش شما دریافت و برای مدیر سالن ارسال شد.", reply_markup=kb)
+    bot.send_message(
+        message.chat.id,
+        "✅ فیش شما دریافت و برای مدیر سالن ارسال شد.\n"
+        "💡 <i>(برای بررسی در نقش مدیر، دستور</i> /rule_Hallad <i>را بزنید).</i>",
+        reply_markup=kb
+    )
 
 
 # =====================================================================
-# بخش ۲: اعلام آمادگی بازیکن و پیدا کردن یار کمکی (برای تیم‌های ناقص)
+# بخش ۲: اعلام آمادگی بازیکن و پیدا کردن یار کمکی
 # =====================================================================
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_avail")
 def cb_menu_avail(call: types.CallbackQuery):
-    """منوی انتخاب پست تخصصی و روشن کردن چراغ آمادگی برای امشب"""
     user = db.upsert_user(call.from_user.id, call.from_user.first_name or "بازیکن")
     status_str = "🟢 آماده بازی امشب" if user["is_available"] else "⚪ غیرفعال"
 
@@ -296,7 +524,6 @@ def cb_menu_avail(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("setavail_"))
 def cb_set_avail(call: types.CallbackQuery):
-    """ثبت تغییر وضعیت آمادگی در دیتابیس"""
     parts = call.data.split("_")
     is_avail, position = int(parts[1]), parts[2]
     db.upsert_user(call.from_user.id, call.from_user.first_name or "بازیکن")
@@ -307,7 +534,6 @@ def cb_set_avail(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_players")
 def cb_menu_players(call: types.CallbackQuery):
-    """نمایش لیست بازیکنانی که امشب آماده بازی هستند برای دعوت به عنوان یار کمکی"""
     players = db.get_available_players()
     kb = types.InlineKeyboardMarkup(row_width=1)
 
@@ -328,7 +554,6 @@ def cb_menu_players(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("invite_"))
 def cb_invite_player(call: types.CallbackQuery):
-    """ارسال دعوت‌نامه به بازیکن انتخاب‌شده و نمایش شبیه‌سازی قبول دعوت در دمو"""
     target_name = call.data.split("_", 2)[2]
     kb = types.InlineKeyboardMarkup(row_width=1)
     kb.add(
@@ -345,12 +570,11 @@ def cb_invite_player(call: types.CallbackQuery):
 
 
 # =====================================================================
-# بخش ۳: سیستم لابی‌های تیم‌یابی (جمع شدن افراد ناشناس و تکمیل ظرفیت)
+# بخش ۳: سیستم لابی‌های تیم‌یابی
 # =====================================================================
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_lobbies")
 def cb_menu_lobbies(call: types.CallbackQuery):
-    """نمایش لیست لابی‌های باز امشب به همراه ظرفیت لحظه‌ای آن‌ها"""
     lobbies = db.get_open_lobbies()
     kb = types.InlineKeyboardMarkup(row_width=1)
 
@@ -372,7 +596,6 @@ def cb_menu_lobbies(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("lobby_view_"))
 def cb_lobby_view(call: types.CallbackQuery):
-    """نمایش جزئیات یک لابی و اسامی بازیکنان داخل آن"""
     lobby_id = int(call.data.split("_")[2])
     lobby, members = db.get_lobby_with_members(lobby_id)
     if not lobby:
@@ -400,10 +623,9 @@ def cb_lobby_view(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("lobby_join_"))
 def cb_lobby_join(call: types.CallbackQuery):
-    """افزودن کاربر به لابی؛ اگر ظرفیت ۶ از ۶ شود پیام جشن تکمیل تیم را نمایش می‌دهد"""
     lobby_id = int(call.data.split("_")[2])
-    user_name = call.from_user.first_name or "بازیکن جدید"
-    result = db.join_lobby(lobby_id, call.from_user.id, user_name, "بازیکن آزاد ⚡")
+    user = db.upsert_user(call.from_user.id, call.from_user.first_name or "بازیکن جدید")
+    result = db.join_lobby(lobby_id, call.from_user.id, user["full_name"], user.get("position") or "بازیکن آزاد ⚡")
 
     if not result["ok"]:
         bot.answer_callback_query(call.id, "شما قبلاً عضو شده‌اید یا ظرفیت لابی پر است!", show_alert=True)
@@ -437,7 +659,6 @@ def cb_lobby_join(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data == "lobby_create_menu")
 def cb_lobby_create_menu(call: types.CallbackQuery):
-    """منوی ساخت سریع لابی جدید"""
     kb = types.InlineKeyboardMarkup(row_width=1)
     kb.add(
         types.InlineKeyboardButton("⚽ لابی ۶ نفره (تیم ۵ نفره داریم، ۱ یار کم)", callback_data="lobby_new_6_5"),
@@ -449,43 +670,32 @@ def cb_lobby_create_menu(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("lobby_new_"))
 def cb_lobby_new_create(call: types.CallbackQuery):
-    """ثبت لابی جدید در دیتابیس"""
     parts = call.data.split("_")
     max_p, init_p = int(parts[2]), int(parts[3])
-    user_name = call.from_user.first_name or "سرگروه"
-    title = f"لابی فوتسال {user_name} ({'۱ نفر کم' if init_p == 5 else 'عمومی'})"
-    db.create_new_lobby(title, "امشب ساعت ۲۲:۳۰ تا ۲۴:۰۰", call.from_user.id, user_name, max_p, init_p)
+    user = db.upsert_user(call.from_user.id, call.from_user.first_name or "سرگروه")
+    title = f"لابی فوتسال {user['full_name']} ({'۱ نفر کم' if init_p == 5 else 'عمومی'})"
+    db.create_new_lobby(title, "امشب ساعت ۲۲:۳۰ تا ۲۴:۰۰", call.from_user.id, user["full_name"], max_p, init_p)
     bot.answer_callback_query(call.id, "✅ لابی جدید با موفقیت ساخته شد!", show_alert=True)
     cb_menu_lobbies(call)
 
 
 # =====================================================================
-# بخش ۴: پنل اختصاصی مدیر سالن (تغییر وضعیت کلیکی، افزودن سانس و تایید فیش)
+# بخش ۴: پنل اختصاصی مدیر سالن (فعال‌سازی با /rule_Hallad)
 # =====================================================================
 
 @bot.callback_query_handler(func=lambda call: call.data == "menu_admin")
 def cb_menu_admin(call: types.CallbackQuery):
-    """منوی اصلی پنل مدیر سالن"""
-    pending_count = len(db.get_pending_slots())
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        types.InlineKeyboardButton("🔄 باز و بسته کردن کلیکی سانس‌ها (🟢/🔴)", callback_data="admin_toggle_list"),
-        types.InlineKeyboardButton(f"🧾 بررسی فیش‌های در انتظار تایید ({pending_count})", callback_data="admin_pending"),
-        types.InlineKeyboardButton("➕ افزودن سریع سانس و قیمت جدید", callback_data="admin_add_day"),
-        types.InlineKeyboardButton("📢 تبدیل سانس خالی مانده به لابی عمومی", callback_data="admin_slot_to_lobby"),
-        types.InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="main_menu")
-    )
+    """بازگشت از زیرمنوهای ادمین به صفحه اصلی پنل مدیر"""
     safe_edit_message(
-        f"⚙️ <b>پنل مدیریت سالن ورزشی:</b>\n📥 فیش‌های منتظر بررسی: <b>{pending_count} مورد</b>",
+        get_admin_menu_text(),
         call.message.chat.id,
         call.message.message_id,
-        reply_markup=kb
+        reply_markup=get_admin_menu_keyboard()
     )
 
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_toggle_list")
 def cb_admin_toggle_list(call: types.CallbackQuery):
-    """نمایش جدول کلیکی سانس‌ها برای باز یا بسته کردن فوری سانس‌های تلفنی توسط مدیر"""
     slots = db.get_slots()
     kb = types.InlineKeyboardMarkup(row_width=1)
     for s in slots:
@@ -505,7 +715,6 @@ def cb_admin_toggle_list(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_flip_"))
 def cb_admin_flip_slot(call: types.CallbackQuery):
-    """تغییر وضعیت سانس در دیتابیس با یک کلیک"""
     slot_id = int(call.data.split("_")[2])
     db.toggle_slot_by_manager(slot_id)
     bot.answer_callback_query(call.id, "✅ وضعیت سانس تغییر کرد!")
@@ -514,7 +723,6 @@ def cb_admin_flip_slot(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_add_day")
 def cb_admin_add_day(call: types.CallbackQuery):
-    """گام اول افزودن سانس: انتخاب روز"""
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
         types.InlineKeyboardButton("📅 امروز", callback_data="addslot_day_امروز"),
@@ -526,7 +734,6 @@ def cb_admin_add_day(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("addslot_day_"))
 def cb_admin_add_time(call: types.CallbackQuery):
-    """گام دوم افزودن سانس: انتخاب بازه زمانی"""
     day_label = call.data.split("_")[2]
     kb = types.InlineKeyboardMarkup(row_width=1)
     for t in ["16:30 تا 18:00", "20:00 تا 21:30", "23:00 تا 00:30"]:
@@ -536,7 +743,6 @@ def cb_admin_add_time(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("addslot_time_"))
 def cb_admin_add_price(call: types.CallbackQuery):
-    """گام سوم افزودن سانس: انتخاب قیمت"""
     parts = call.data.split("_")
     day_label, time_range = parts[2], parts[3]
     kb = types.InlineKeyboardMarkup(row_width=1)
@@ -547,7 +753,6 @@ def cb_admin_add_price(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("addslot_save_"))
 def cb_admin_save_slot(call: types.CallbackQuery):
-    """ذخیره نهایی سانس جدید در دیتابیس"""
     parts = call.data.split("_")
     db.add_new_slot(parts[2], parts[3], int(parts[4]))
     bot.answer_callback_query(call.id, "✅ سانس جدید با موفقیت اضافه شد!", show_alert=True)
@@ -556,7 +761,6 @@ def cb_admin_save_slot(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_pending")
 def cb_admin_pending(call: types.CallbackQuery):
-    """نمایش فیش‌های در انتظار تایید به مدیر سالن"""
     pendings = db.get_pending_slots()
     kb = types.InlineKeyboardMarkup(row_width=2)
     if not pendings:
@@ -571,13 +775,12 @@ def cb_admin_pending(call: types.CallbackQuery):
             types.InlineKeyboardButton(f"✅ تایید #{p['id']}", callback_data=f"verify_ok_{p['id']}"),
             types.InlineKeyboardButton(f"❌ رد #{p['id']}", callback_data=f"verify_no_{p['id']}")
         )
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_admin"))
+    kb.add(types.InlineKeyboardButton("🔙 بازگشت به پنل مدیر", callback_data="menu_admin"))
     safe_edit_message(text, call.message.chat.id, call.message.message_id, reply_markup=kb)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("verify_"))
 def cb_admin_verify(call: types.CallbackQuery):
-    """تایید یا رد کردن فیش توسط مدیر و ارسال پیام خودکار به مشتری"""
     parts = call.data.split("_")
     approve = (parts[1] == "ok")
     updated = db.verify_booking_by_manager(int(parts[2]), approve)
@@ -591,23 +794,21 @@ def cb_admin_verify(call: types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_slot_to_lobby")
 def cb_admin_slot_to_lobby(call: types.CallbackQuery):
-    """تبدیل یک سانس خالی مانده سالن به لابی عمومی ۱۲ نفره"""
     free_slots = [s for s in db.get_slots() if s["status"] == "free"]
     kb = types.InlineKeyboardMarkup(row_width=1)
     for s in free_slots:
         kb.add(types.InlineKeyboardButton(f"📢 تبدیل به لابی: {s['day_label']} ({s['time_range']})", callback_data=f"convlobby_{s['id']}"))
-    kb.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="menu_admin"))
+    kb.add(types.InlineKeyboardButton("🔙 بازگشت به پنل مدیر", callback_data="menu_admin"))
     safe_edit_message("📢 روی سانس خالی کلیک کنید تا به لابی ۱۲ نفره تبدیل شود:", call.message.chat.id, call.message.message_id, reply_markup=kb)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("convlobby_"))
 def cb_convert_slot_to_lobby(call: types.CallbackQuery):
-    """ثبت لابی ۱۲ نفره برای سانس خالی انتخاب‌شده"""
     slot = db.get_slot_by_id(int(call.data.split("_")[1]))
     if slot:
         db.create_new_lobby(f"سانس ویژه ({slot['day_label']})", f"{slot['day_label']} {slot['time_range']}", call.from_user.id, "مدیر سالن", 12, 0)
         bot.answer_callback_query(call.id, "✅ لابی ۱۲ نفره ساخته شد!", show_alert=True)
-    cb_menu_lobbies(call)
+    cb_menu_admin(call)
 
 
 # =====================================================================
@@ -616,14 +817,14 @@ def cb_convert_slot_to_lobby(call: types.CallbackQuery):
 
 @bot.message_handler(content_types=["web_app_data"])
 def handle_webapp_response(message: types.Message):
-    """وقتی کاربر داخل مینی‌اپ روی جای خالی زمین یا سانس کلیک می‌کند، JSON آن اینجا دریافت می‌شود"""
     try:
         data = json.loads(message.web_app_data.data)
     except Exception:
         return
 
     user_id = message.from_user.id
-    user_name = message.from_user.first_name or "بازیکن مینی‌اپ"
+    user = db.upsert_user(user_id, message.from_user.first_name or "بازیکن مینی‌اپ")
+    user_name = user["full_name"]
     action = data.get("action")
 
     if action == "join_lobby":
@@ -648,7 +849,8 @@ def handle_webapp_response(message: types.Message):
         db.submit_booking_receipt(int(data.get("slot_id", 1)), user_id, user_name, "WEBAPP_RECEIPT")
         bot.send_message(
             message.chat.id,
-            f"✅ <b>درخواست رزرو سانس ({data.get('slot_title')}) از مینی‌اپ ثبت شد و به پنل مدیر سالن رفت!</b>",
+            f"✅ <b>درخواست رزرو سانس ({data.get('slot_title')}) از مینی‌اپ ثبت شد!</b>\n"
+            f"💡 <i>برای تایید فیش در نقش مدیر سالن، دستور</i> /rule_Hallad <i>را ارسال کنید.</i>",
             reply_markup=get_main_menu_keyboard(user_id)
         )
 

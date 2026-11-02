@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>مینی‌اپ رزرو سالن و زمین فوتسال</title>
+  <!-- اسکریپت رسمی ارتباط صفحه وب با تلگرام -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --card-bg: #1e293b;
+      --pitch-green: #15803d;
+      --pitch-light: #16a34a;
+      --accent: #22c55e;
+      --danger: #ef4444;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Tahoma, sans-serif; }
+    body { background-color: var(--bg-dark); color: var(--text-main); padding: 14px 14px 90px 14px; user-select: none; }
+
+    /* استایل تب‌های بالای صفحه */
+    .tabs { display: flex; background: var(--card-bg); border-radius: 10px; padding: 4px; margin: 12px 0; }
+    .tab-btn { flex: 1; padding: 9px; text-align: center; font-size: 13px; font-weight: bold; color: var(--text-muted); border-radius: 8px; cursor: pointer; transition: 0.2s; }
+    .tab-btn.active { background: var(--accent); color: #052e16; }
+
+    /* طراحی زمین چمن فوتسال از نمای بالا */
+    .pitch-container {
+      position: relative; width: 100%; max-width: 360px; height: 410px; margin: 0 auto;
+      background: repeating-linear-gradient(to bottom, var(--pitch-green) 0px, var(--pitch-green) 41px, var(--pitch-light) 41px, var(--pitch-light) 82px);
+      border: 3px solid rgba(255, 255, 255, 0.85); border-radius: 14px; overflow: hidden;
+    }
+    .mid-line { position: absolute; top: 50%; left: 0; right: 0; height: 2px; background: rgba(255,255,255,0.7); }
+    .center-circle { position: absolute; top: 50%; left: 50%; width: 80px; height: 80px; border: 2px solid rgba(255,255,255,0.7); border-radius: 50%; transform: translate(-50%, -50%); }
+
+    /* استایل دایره‌های بازیکنان روی زمین */
+    .player-node { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; cursor: pointer; }
+    .jersey { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 19px; font-weight: bold; }
+    .player-node.taken .jersey { background: #334155; border: 2px solid #94a3b8; }
+    .player-node.empty .jersey { background: rgba(34, 197, 94, 0.3); border: 2.5px dashed #4ade80; animation: pulse 1.5s infinite; }
+    .player-node.selected .jersey { background: #f59e0b; border: 3px solid #fff; color: #000; animation: none; }
+    .player-label { margin-top: 4px; background: rgba(15, 23, 42, 0.9); padding: 2px 6px; border-radius: 5px; font-size: 11px; white-space: nowrap; }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
+      70% { box-shadow: 0 0 0 12px rgba(74, 222, 128, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+    }
+
+    /* =====================================================
+       استایل جدید بخش رزرو سالن (الهام‌گرفته از عکس دوم)
+       ===================================================== */
+    
+    /* کادر نام مجموعه ورزشی در بالای روزها */
+    .hall-header-box {
+      background: var(--card-bg);
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    /* نوار روزهای هفته در بالای صفحه (زیر تب جدول سانس‌ها) */
+    .days-wrapper {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 10px 8px;
+      margin-bottom: 12px;
+      border: 1px solid #334155;
+    }
+    .date-range-label {
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .days-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .day-btn {
+      background: #0f172a;
+      color: var(--text-muted);
+      border: 1.5px solid #334155;
+      border-radius: 8px;
+      padding: 8px 4px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    /* استایل روز انتخاب‌شده مشابه کادر سبز رنگ روز جمعه در عکس نمونه */
+    .day-btn.active {
+      background: rgba(34, 197, 94, 0.12);
+      color: #4ade80;
+      border: 2px solid var(--accent);
+      box-shadow: 0 0 8px rgba(34, 197, 94, 0.25);
+    }
+
+    /* عنوان تاریخ روز انتخاب‌شده و راهنمای رنگ‌ها */
+    .selected-day-banner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+      font-size: 13px;
+    }
+    .legend {
+      display: flex;
+      gap: 10px;
+      font-size: 11px;
+    }
+    .legend span { display: flex; align-items: center; gap: 4px; }
+    .dot-green { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); display: inline-block; }
+    .dot-red { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); display: inline-block; }
+
+    /* شبکه کادربندی‌شده ساعات رزرو */
+    .slots-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .slot-box {
+      border-radius: 10px;
+      padding: 12px 10px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    /* کادر سبز برای ساعات آزاد (رزرو نشده) */
+    .slot-box.free {
+      background: rgba(34, 197, 94, 0.1);
+      border: 2px solid rgba(34, 197, 94, 0.55);
+      cursor: pointer;
+    }
+    .slot-box.free:hover {
+      background: rgba(34, 197, 94, 0.18);
+    }
+    /* حالت انتخاب‌شده توسط کاربر */
+    .slot-box.free.selected {
+      background: rgba(34, 197, 94, 0.28);
+      border: 2.5px solid #4ade80;
+      box-shadow: 0 0 12px rgba(34, 197, 94, 0.45);
+      transform: translateY(-2px);
+    }
+
+    /* کادر قرمز برای ساعات رزرو شده */
+    .slot-box.booked {
+      background: rgba(239, 68, 68, 0.1);
+      border: 2px solid rgba(239, 68, 68, 0.5);
+      cursor: not-allowed;
+      opacity: 0.85;
+    }
+
+    .slot-time {
+      font-size: 13px;
+      font-weight: bold;
+      color: var(--text-main);
+      text-align: center;
+      padding-bottom: 6px;
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.12);
+    }
+    .slot-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+    }
+    .badge-free {
+      color: #4ade80;
+      font-weight: bold;
+    }
+    .badge-booked {
+      color: #f87171;
+      font-weight: bold;
+    }
+    .slot-price {
+      color: #e2e8f0;
+      font-weight: bold;
+    }
+
+    /* دکمه ثابت تایید در پایین صفحه */
+    .bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #0f172a; padding: 12px; border-top: 1px solid #334155; z-index: 10; }
+    .submit-btn { width: 100%; background: var(--accent); color: #052e16; border: none; padding: 12px; border-radius: 10px; font-size: 14px; font-weight: bold; cursor: pointer; }
+    .submit-btn:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+
+  <h3 style="text-align: center; font-size: 16px;">🏟 پنل گرافیکی ترکیب تیم و رزرو سالن</h3>
+
+  <!-- دکمه‌های جابه‌جایی بین تب زمین بازی و تب سانس‌ها -->
+  <div class="tabs">
+    <div id="tabBtnPitch" class="tab-btn active" onclick="switchTab('pitch')">⚽ زمین فوتسال (۵ از ۶ نفر)</div>
+    <div id="tabBtnSlots" class="tab-btn" onclick="switchTab('slots')">📅 جدول سانس‌های سالن</div>
+  </div>
+
+  <!-- تب اول: نمای زمین چمن و ۶ بازیکن -->
+  <div id="viewPitch">
+    <div class="pitch-container">
+      <div class="mid-line"></div>
+      <div class="center-circle"></div>
+
+      <!-- ۵ بازیکن حاضر در لابی -->
+      <div class="player-node taken" style="top: 18%; left: 50%;"><div class="jersey">⚡</div><div class="player-label">سهراب مرادی (مهاجم)</div></div>
+      <div class="player-node taken" style="top: 40%; left: 22%;"><div class="jersey">🏃</div><div class="player-label">کیارش نادری (وینگر)</div></div>
+      <div class="player-node taken" style="top: 66%; left: 28%;"><div class="jersey">🛡️</div><div class="player-label">محمدامین کریمی</div></div>
+      <div class="player-node taken" style="top: 66%; left: 72%;"><div class="jersey">🛡️</div><div class="player-label">پویا شمس (دفاع)</div></div>
+      <div class="player-node taken" style="top: 88%; left: 50%;"><div class="jersey">🧤</div><div class="player-label">امیرحسین رضایی (دروازه‌بان)</div></div>
+
+      <!-- جایگاه خالی نفر ششم -->
+      <div id="emptySpotNode" class="player-node empty" style="top: 40%; left: 78%;" onclick="selectPitchPosition('وینگر چپ ⚡')">
+        <div id="emptySpotIcon" class="jersey">➕</div>
+        <div id="emptySpotLabel" class="player-label" style="color: #4ade80;">جای خالی (کلیک کنید)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- تب دوم: انتخاب روز و مشاهده کادرهای سانس سالن -->
+  <div id="viewSlots" class="hidden">
+    
+    <!-- نوار مشخصات سالن مشابه بالای صفحه عکس دوم -->
+    <div class="hall-header-box">
+      <span>🏟 <b>سالن ورزشی شماره ۱ (چمن مصنوعی)</b></span>
+      <span style="color: var(--accent);">هفته جاری</span>
+    </div>
+
+    <!-- کادر انتخاب روزهای هفته در بالای صفحه زیر تب جدول سانس‌ها -->
+    <div class="days-wrapper">
+      <div class="date-range-label">◀ بازه زمانی: ۱۴۰۵/۰۸/۰۹ الی ۱۴۰۵/۰۸/۱۵ ▶</div>
+      <div id="daysBar" class="days-bar">
+        <!-- دکمه‌های روزهای هفته توسط جاوااسکریپت ساخته می‌شوند -->
+      </div>
+    </div>
+
+    <!-- هدر روز انتخاب‌شده و راهنمای رنگ کادرها -->
+    <div class="selected-day-banner">
+      <strong id="currentDayTitle" style="color: #f8fafc;">📅 سانس‌های شنبه (۱۴۰۵/۰۸/۰۹)</strong>
+      <div class="legend">
+        <span><i class="dot-green"></i> آزاد</span>
+        <span><i class="dot-red"></i> رزرو شده</span>
+      </div>
+    </div>
+
+    <!-- کادرهای ساعات رزرو (سبز و قرمز) -->
+    <div id="slotsGrid" class="slots-grid">
+      <!-- کادرهای سانس هر روز در اینجا قرار می‌گیرند -->
+    </div>
+
+  </div>
+
+  <!-- دکمه ارسال داده به بات پایتون -->
+  <div class="bottom-bar">
+    <button id="actionBtn" class="submit-btn" disabled onclick="submitToBot()">
+      روی جای خالی زمین یا یک سانس سبز کلیک کنید
+    </button>
+  </div>
+
+  <script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+    let payload = null;
+    let activeDayKey = 'sat';
+
+    // داده‌های روزهای هفته و سانس‌های کادربندی‌شده (سبز = free، قرمز = booked)
+    // شناسه‌های slot_id (1, 4, 5, 6) دقیقاً منطبق با سانس‌های آزاد دیتابیس db.py تنظیم شده‌اند
+    const weekSchedule = {
+      sat: {
+        name: 'شنبه',
+        date: '۱۴۰۵/۰۸/۰۹',
+        slots: [
+          { id: 1, time: '۱۶:۳۰ تا ۱۸:۰۰', price: 450000, status: 'booked' },
+          { id: 1, time: '۱۸:۰۰ تا ۱۹:۳۰', price: 500000, status: 'free' },
+          { id: 2, time: '۱۹:۳۰ تا ۲۱:۰۰', price: 600000, status: 'booked' },
+          { id: 3, time: '۲۱:۰۰ تا ۲۲:۳۰', price: 650000, status: 'booked' },
+          { id: 4, time: '۲۲:۳۰ تا ۲۴:۰۰', price: 550000, status: 'free' },
+          { id: 4, time: '۰۰:۰۰ تا ۰۱:۳۰', price: 450000, status: 'free' }
+        ]
+      },
+      sun: {
+        name: 'یک‌شنبه',
+        date: '۱۴۰۵/۰۸/۱۰',
+        slots: [
+          { id: 5, time: '۱۶:۳۰ تا ۱۸:۰۰', price: 450000, status: 'free' },
+          { id: 5, time: '۱۸:۰۰ تا ۱۹:۳۰', price: 500000, status: 'free' },
+          { id: 6, time: '۱۹:۳۰ تا ۲۱:۰۰', price: 650000, status: 'free' },
+          { id: 2, time: '۲۱:۰۰ تا ۲۲:۳۰', price: 650000, status: 'booked' },
+          { id: 3, time: '۲۲:۳۰ تا ۲۴:۰۰', price: 550000, status: 'booked' },
+          { id: 6, time: '۰۰:۰۰ تا ۰۱:۳۰', price: 450000, status: 'free' }
+        ]
+      },
+      mon: {
+        name: 'دوشنبه',
+        date: '۱۴۰۵/۰۸/۱۱',
+        slots: [
+          { id: 2, time: '۱۶:۳۰ تا ۱۸:۰۰', price: 450000, status: 'booked' },
+          { id: 3, time: '۱۸:۰۰ تا ۱۹:۳۰', price: 500000, status: 'booked' },
+          { id: 1, time: '۱۹:۳۰ تا ۲۱:۰۰', price: 600000, status: 'free' },
+          { id: 4, time: '۲۱:۰۰ تا ۲۲:۳۰', price: 650000, status: 'free' },
+          { id: 2, time: '۲۲:۳۰ تا ۲۴:۰۰', price: 550000, status: 'booked' },
+          { id: 5, time: '۰۰:۰۰ تا ۰۱:۳۰', price: 450000, status: 'free' }
+        ]
+      },
+      tue: {
+        name: 'سه‌شنبه',
+        date: '۱۴۰۵/۰۸/۱۲',
+        slots: [
+          { id: 1, time: '۱۶:۳۰ تا ۱۸:۰۰', price: 450000, status: 'free' },
+          { id: 2, time: '۱۸:۰۰ تا ۱۹:۳۰', price: 500000, status: 'booked' },
+          { id: 3, time: '۱۹:۳۰ تا ۲۱:۰۰', price: 600000, status: 'booked' },
+          { id: 3, time: '۲۱:۰۰ تا ۲۲:۳۰', price: 650000, status: 'booked' },
+          { id: 4, time: '۲۲:۳۰ تا ۲۴:۰۰', price: 550000, status: 'free' },
+          { id: 2, time: '۰۰:۰۰ تا ۰۱:۳۰', price: 450000, status: 'booked' }
+        ]
+      },
+      wed: {
+        name: 'چهارشنبه',
+        date: '۱۴۰۵/۰۸/۱۳',
+        slots: [
+          { id: 5, time: '۱۶:۳۰ تا ۱۸:۰۰', price: 450000, status: 'free' },
+          { id: 5, time: '۱۸:۰۰ تا ۱۹:۳۰', price: 500000, status: 'free' },
+          { id: 2, time: '۱۹:۳۰ تا ۲۱:۰۰', price: 600000, status: 'booked' },
+          { id: 6, time: '۲۱:۰۰ تا ۲۲:۳۰', price: 650000, status: 'free' },
+          { id: 4, time: '۲۲:۳۰ تا ۲۴:۰۰', price: 550000, status: 'free' },
+          { id: 3, time: '۰۰:۰۰ تا ۰۱:۳۰', price: 450000, status: 'booked' }
+        ]
+      },
+      thu: {
+        name: 'پنج‌شنبه',
+        date: '۱۴۰۵/۰۸/۱۴',
+        slots: [
+          { id: 2, time: '۱۶:۳۰ تا ۱۸:۰۰', price: 500000, status: 'booked' },
+          { id: 3, time: '۱۸:۰۰ تا ۱۹:۳۰', price: 550000, status: 'booked' },
+          { id: 2, time: '۱۹:۳۰ تا ۲۱:۰۰', price: 650000, status: 'booked' },
+          { id: 3, time: '۲۱:۰۰ تا ۲۲:۳۰', price: 700000, status: 'booked' },
+          { id: 4, time: '۲۲:۳۰ تا ۲۴:۰۰', price: 600000, status: 'free' },
+          { id: 6, time: '۰۰:۰۰ تا ۰۱:۳۰', price: 500000, status: 'free' }
+        ]
+      },
+      fri: {
+        name: 'جمعه',
+        date: '۱۴۰۵/۰۸/۱۵',
+        slots: [
+          { id: 1, time: '۱۶:۳۰ تا ۱۸:۰۰', price: 500000, status: 'free' },
+          { id: 5, time: '۱۸:۰۰ تا ۱۹:۳۰', price: 550000, status: 'free' },
+          { id: 2, time: '۱۹:۳۰ تا ۲۱:۰۰', price: 650000, status: 'booked' },
+          { id: 6, time: '۲۱:۰۰ تا ۲۲:۳۰', price: 700000, status: 'free' },
+          { id: 3, time: '۲۲:۳۰ تا ۲۴:۰۰', price: 600000, status: 'booked' },
+          { id: 4, time: '۰۰:۰۰ تا ۰۱:۳۰', price: 500000, status: 'free' }
+        ]
+      }
+    };
+
+    // ساخت دکمه‌های روزهای هفته در بالای صفحه
+    function renderDaysBar() {
+      const bar = document.getElementById('daysBar');
+      bar.innerHTML = '';
+      Object.keys(weekSchedule).forEach(key => {
+        const day = weekSchedule[key];
+        const btn = document.createElement('div');
+        btn.className = 'day-btn' + (key === activeDayKey ? ' active' : '');
+        btn.textContent = day.name;
+        btn.onclick = () => selectDay(key);
+        bar.appendChild(btn);
+      });
+    }
+
+    // تغییر روز فعال و نمایش سانس‌های همان روز
+    function selectDay(dayKey) {
+      activeDayKey = dayKey;
+      renderDaysBar();
+      renderDaySlots(dayKey);
+    }
+
+    // ساخت کادرهای سبز و قرمز سانس‌ها برای روز انتخاب‌شده
+    function renderDaySlots(dayKey) {
+      const dayData = weekSchedule[dayKey];
+      document.getElementById('currentDayTitle').textContent = `📅 سانس‌های ${dayData.name} (${dayData.date})`;
+
+      const grid = document.getElementById('slotsGrid');
+      grid.innerHTML = '';
+
+      dayData.slots.forEach((slot) => {
+        const box = document.createElement('div');
+        const isFree = slot.status === 'free';
+        box.className = `slot-box ${isFree ? 'free' : 'booked'}`;
+
+        const priceFormatted = slot.price.toLocaleString('fa-IR');
+
+        box.innerHTML = `
+          <div class="slot-time">🕒 ${slot.time}</div>
+          <div class="slot-info">
+            <span class="${isFree ? 'badge-free' : 'badge-booked'}">
+              ${isFree ? '🟢 آزاد' : '🔴 رزرو شده'}
+            </span>
+            <span class="slot-price">${isFree ? priceFormatted + ' ت' : 'تکمیل'}</span>
+          </div>
+        `;
+
+        if (isFree) {
+          box.onclick = () => selectVenueSlot(slot.id, `${dayData.name} ساعت ${slot.time}`, slot.price, box);
+        } else {
+          box.onclick = () => {
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+          };
+        }
+
+        grid.appendChild(box);
+      });
+    }
+
+    // جابه‌جایی بین تب زمین فوتسال و تب جدول سانس‌ها
+    function switchTab(tab) {
+      document.getElementById('tabBtnPitch').classList.toggle('active', tab === 'pitch');
+      document.getElementById('tabBtnSlots').classList.toggle('active', tab === 'slots');
+      document.getElementById('viewPitch').classList.toggle('hidden', tab !== 'pitch');
+      document.getElementById('viewSlots').classList.toggle('hidden', tab !== 'slots');
+    }
+
+    // انتخاب جای خالی روی زمین فوتسال
+    function selectPitchPosition(posName) {
+      const node = document.getElementById('emptySpotNode');
+      node.classList.remove('empty');
+      node.classList.add('selected');
+      document.getElementById('emptySpotIcon').textContent = '⭐';
+      document.getElementById('emptySpotLabel').textContent = 'شما (نفر ششم)';
+
+      payload = { action: 'join_lobby', lobby_id: 1, position: posName };
+      const btn = document.getElementById('actionBtn');
+      btn.disabled = false;
+      btn.textContent = `✅ تایید حضور در پست «${posName}» و تکمیل تیم`;
+    }
+
+    // انتخاب یک کادر سانس سبز رنگ
+    function selectVenueSlot(slotId, timeTitle, price, el) {
+      document.querySelectorAll('.slot-box').forEach(c => c.classList.remove('selected'));
+      el.classList.add('selected');
+      payload = { action: 'book_slot', slot_id: slotId, slot_title: timeTitle, price: price };
+      const btn = document.getElementById('actionBtn');
+      btn.disabled = false;
+      btn.textContent = `🏟 رزرو قطعی (${timeTitle})`;
+    }
+
+    // ارسال اطلاعات به بات پایتون
+    function submitToBot() {
+      if (payload) {
+        tg.sendData(JSON.stringify(payload));
+      }
+    }
+
+    // بارگذاری اولیه روزهای هفته و سانس‌های روز شنبه
+    renderDaysBar();
+    renderDaySlots('sat');
+  </script>
+</body>
+</html>
