@@ -1,6 +1,29 @@
-venv/
-__pycache__/
-*.pyc
-Token.txt
+# Environment & Secrets (مهم: هرگز به گیت‌هاب نروند)
 .env
+.env.*
+!.env.bale.example
+Token.txt
+
+# Databases & Backups
 *.db
+*.sqlite
+*.sqlite3
+*.sql
+*.sql.gz
+backups/
+
+# Python Cache & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+.venv/
+env/
+
+# IDE & OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.zip
